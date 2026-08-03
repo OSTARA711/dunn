@@ -1,0 +1,46 @@
+# Build output
+build/
+bin/
+obj/
+*.o
+*.a
+*.so
+*.out
+
+# Executables
+dunn
+
+# Debugging
+*.core
+core
+core.*
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# CMake (if added later)
+CMakeFiles/
+CMakeCache.txt
+cmake-build-*/
+install_manifest.txt
+
+# Autotools (if added later)
+autom4te.cache/
+config.log
+config.status
+Makefile.in
+
+# Generated files
+*.log
+*.tmp
+
+# Local configuration
+*.local
+.env
+
+# OS files
+.DS_Store
+Thumbs.db
