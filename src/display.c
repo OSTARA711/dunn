@@ -9,11 +9,14 @@
 #include "dunn.h"
 
 
-#define CYAN  "\033[36m"
-#define GREEN "\033[32m"
-#define YELLOW "\033[33m"
-#define RED   "\033[31m"
-#define RESET "\033[0m"
+#define GREEN        "\033[92m"
+#define RED          "\033[91m"
+#define YELLOW       "\033[93m"
+#define BOLD         "\033[1m"
+#define RESET        "\033[0m"
+
+
+#define DISPLAY_WIDTH 44
 
 
 static void separator(void)
@@ -46,6 +49,38 @@ static const char *discovery_result_name(
         default:
             return "NOT RUN";
     }
+}
+
+
+/*
+ * DUNN terminal branding.
+ *
+ * The ASCII logo provides a larger visual identity
+ * without depending on terminal-specific font controls.
+ */
+
+static void display_banner(void)
+{
+    printf("\n");
+
+    printf(RESET);
+
+    printf(GREEN);
+
+    printf("                    DUNN\n");
+
+    printf(RESET);
+
+    printf("============================================\n");
+
+    printf(GREEN);
+
+    printf("         Firewall Security Monitor\n");
+
+    printf(RESET);
+
+
+    printf("============================================\n");
 }
 
 
@@ -98,10 +133,26 @@ static void display_firewall(
     separator();
 
 
-    if (snapshot->status.active)
-        printf(GREEN "Firewall : ACTIVE\n" RESET);
-    else
-        printf("Firewall : INACTIVE\n");
+    switch (snapshot->status.state)
+    {
+        case DUNN_FIREWALL_ACTIVE:
+
+            printf(GREEN "Firewall : ACTIVE\n" RESET);
+            break;
+
+
+        case DUNN_FIREWALL_INACTIVE:
+
+            printf(RED "Firewall : INACTIVE\n" RESET);
+            break;
+
+
+        case DUNN_FIREWALL_UNKNOWN:
+        default:
+
+            printf("Firewall : UNKNOWN\n");
+            break;
+    }
 
 
     printf("Discovery: %s\n",
@@ -187,7 +238,15 @@ static void display_ports(
 
     if (snapshot->port_count == 0)
     {
-        printf("No listening ports discovered.\n");
+        if (snapshot->ports_result == DUNN_DISCOVERY_OK)
+        {
+            printf("No listening ports discovered.\n");
+        }
+        else
+        {
+            printf("Listening ports could not be established.\n");
+        }
+
         return;
     }
 
@@ -225,13 +284,7 @@ void dunn_display_snapshot(
         return;
 
 
-    printf(CYAN);
-    printf("\n");
-    printf("============================================\n");
-    printf("        DUNN Firewall Security Monitor\n");
-    printf("============================================\n");
-    printf(RESET);
-
+    display_banner();
 
     display_system(snapshot);
 
