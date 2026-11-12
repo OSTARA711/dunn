@@ -4,10 +4,53 @@
  * src/main.c
  */
 
-#include <stdio.h>
 #include <string.h>
 
 #include "dunn.h"
+
+
+/*
+ * Determine the aggregate backend.
+ *
+ * Zero detected backends:
+ *     DUNN_BACKEND_NONE
+ *
+ * One detected backend:
+ *     That backend
+ *
+ * Multiple detected backends:
+ *     DUNN_BACKEND_UNKNOWN
+ *
+ * Multiple backends may coexist. In particular,
+ * UFW may manage rules through nftables.
+ */
+
+static DunnFirewallBackend determine_aggregate_backend(
+        const DunnSnapshot *snapshot)
+{
+    DunnFirewallBackend detected = DUNN_BACKEND_NONE;
+    size_t installed_count = 0;
+
+    for (size_t i = 0; i < snapshot->backend_count; i++)
+    {
+        const DunnFirewallBackendInfo *backend =
+            &snapshot->backends[i];
+
+        if (backend->installation != DUNN_INSTALLATION_INSTALLED)
+            continue;
+
+        detected = backend->backend;
+        installed_count++;
+    }
+
+    if (installed_count == 0)
+        return DUNN_BACKEND_NONE;
+
+    if (installed_count == 1)
+        return detected;
+
+    return DUNN_BACKEND_UNKNOWN;
+}
 
 
 int main(void)
@@ -30,42 +73,94 @@ int main(void)
 
 
     /*
-     * Firewall status.
+     * Firewall backend reconnaissance.
+     *
+     * Inspect all supported backends independently.
+     * This operation is read-only.
      */
 
-    if (dunn_get_ufw_status(&snapshot.status) != 0)
-    {
-        snapshot.firewall_result =
-            DUNN_DISCOVERY_FAILED;
-    }
-    else
-    {
-        snapshot.firewall_result =
-            DUNN_DISCOVERY_OK;
-    }
+    snapshot.backend_result =
+        dunn_rekon_firewall_backends(
+            snapshot.backends,
+            DUNN_MAX_BACKENDS,
+            &snapshot.backend_count);
 
 
     /*
-     * Firewall rules.
+     * Determine the aggregate backend.
      */
 
-    if (dunn_get_ufw_rules(
-            snapshot.rules,
-            DUNN_MAX_RULES,
-            &snapshot.rule_count) != 0)
+    snapshot.aggregate_backend =
+        determine_aggregate_backend(&snapshot);
+
+
+    /*
+     * UFW status.
+     *
+     * UFW-specific inspection is performed only when
+     * its executable has been detected.
+     */
+
+    int ufw_available = 0;
+
+    for (size_t i = 0; i < snapshot.backend_count; i++)
     {
-        snapshot.rules_result =
-            DUNN_DISCOVERY_FAILED;
+        if (snapshot.backends[i].backend == DUNN_BACKEND_UFW &&
+            snapshot.backends[i].installation == DUNN_INSTALLATION_INSTALLED)
+        {
+            ufw_available = 1;
+            break;
+        }
+    }
+
+
+    if (ufw_available)
+    {
+        if (dunn_get_ufw_status(&snapshot.status) != 0)
+        {
+            snapshot.firewall_result =
+                DUNN_DISCOVERY_FAILED;
+        }
+        else
+        {
+            snapshot.firewall_result =
+                DUNN_DISCOVERY_OK;
+        }
+
+
+        /*
+         * UFW firewall rules.
+         */
+
+        if (dunn_get_ufw_rules(
+                snapshot.rules,
+                DUNN_MAX_RULES,
+                &snapshot.rule_count) != 0)
+        {
+            snapshot.rules_result =
+                DUNN_DISCOVERY_FAILED;
+        }
+        else
+        {
+            snapshot.rules_result =
+                DUNN_DISCOVERY_OK;
+        }
     }
     else
     {
+        snapshot.firewall_result =
+            DUNN_DISCOVERY_UNAVAILABLE;
+
         snapshot.rules_result =
-            DUNN_DISCOVERY_OK;
+            DUNN_DISCOVERY_UNAVAILABLE;
     }
 
 
     /*
      * Listening ports.
+     *
+     * This operation is independent of firewall
+     * backend availability.
      */
 
     if (dunn_get_listening_ports(

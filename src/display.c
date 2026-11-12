@@ -12,11 +12,7 @@
 #define GREEN        "\033[92m"
 #define RED          "\033[91m"
 #define YELLOW       "\033[93m"
-#define BOLD         "\033[1m"
 #define RESET        "\033[0m"
-
-
-#define DISPLAY_WIDTH 44
 
 
 static void separator(void)
@@ -52,33 +48,128 @@ static const char *discovery_result_name(
 }
 
 
+static const char *backend_name(
+        DunnFirewallBackend backend)
+{
+    switch (backend)
+    {
+        case DUNN_BACKEND_NONE:
+            return "None";
+
+        case DUNN_BACKEND_UFW:
+            return "UFW";
+
+        case DUNN_BACKEND_NFTABLES:
+            return "nftables";
+
+        case DUNN_BACKEND_FIREWALLD:
+            return "firewalld";
+
+        case DUNN_BACKEND_IPTABLES:
+            return "iptables";
+
+        case DUNN_BACKEND_UNKNOWN:
+        default:
+            return "Unknown";
+    }
+}
+
+
+static const char *installation_name(
+        DunnInstallationState state)
+{
+    switch (state)
+    {
+        case DUNN_INSTALLATION_INSTALLED:
+            return GREEN "Available" RESET;
+
+        case DUNN_INSTALLATION_NOT_INSTALLED:
+            return "Not found";
+
+        case DUNN_INSTALLATION_UNKNOWN:
+        default:
+            return "Unknown";
+    }
+}
+
+
+static const char *service_name(
+        DunnServiceState state)
+{
+    switch (state)
+    {
+        case DUNN_SERVICE_NOT_APPLICABLE:
+            return "Not applicable";
+
+        case DUNN_SERVICE_INACTIVE:
+            return RED "Inactive" RESET;
+
+        case DUNN_SERVICE_ACTIVE:
+            return GREEN "Active" RESET;
+
+        case DUNN_SERVICE_UNKNOWN:
+        default:
+            return "Unknown";
+    }
+}
+
+
+static const char *ruleset_name(
+        DunnRulesetState state)
+{
+    switch (state)
+    {
+        case DUNN_RULESET_NOT_APPLICABLE:
+            return "Not applicable";
+
+        case DUNN_RULESET_EMPTY:
+            return YELLOW "Empty" RESET;
+
+        case DUNN_RULESET_PRESENT:
+            return GREEN "Present" RESET;
+
+        case DUNN_RULESET_UNKNOWN:
+        default:
+            return "Unknown";
+    }
+}
+
+
+static const char *enforcement_name(
+        DunnEnforcementState state)
+{
+    switch (state)
+    {
+        case DUNN_ENFORCEMENT_NOT_ESTABLISHED:
+            return YELLOW "Not established" RESET;
+
+        case DUNN_ENFORCEMENT_ESTABLISHED:
+            return GREEN "Established" RESET;
+
+        case DUNN_ENFORCEMENT_UNKNOWN:
+        default:
+            return "Unknown";
+    }
+}
+
+
 /*
  * DUNN terminal branding.
- *
- * The ASCII logo provides a larger visual identity
- * without depending on terminal-specific font controls.
  */
 
 static void display_banner(void)
 {
     printf("\n");
 
-    printf(RESET);
-
     printf(GREEN);
-
     printf("                    DUNN\n");
-
     printf(RESET);
 
     printf("============================================\n");
 
     printf(GREEN);
-
     printf("         Firewall Security Monitor\n");
-
     printf(RESET);
-
 
     printf("============================================\n");
 }
@@ -123,6 +214,81 @@ static void display_system(
 
     printf("Discovery        : %s\n",
            discovery_result_name(snapshot->system_result));
+}
+
+
+/*
+ * Firewall backend reconnaissance.
+ *
+ * Executable availability, service state, ruleset
+ * presence and enforcement are separate findings.
+ */
+
+static void display_backends(
+        const DunnSnapshot *snapshot)
+{
+    printf("\nFIREWALL BACKENDS\n");
+    separator();
+
+
+    printf("Discovery        : %s\n",
+           discovery_result_name(snapshot->backend_result));
+
+
+    printf("Aggregate backend: %s\n",
+           backend_name(snapshot->aggregate_backend));
+
+
+    if (snapshot->backend_count == 0)
+    {
+        printf("No backend records available.\n");
+        return;
+    }
+
+
+    for (size_t i = 0;
+         i < snapshot->backend_count;
+         i++)
+    {
+        const DunnFirewallBackendInfo *backend =
+            &snapshot->backends[i];
+
+
+        printf("\n%s\n", backend_name(backend->backend));
+        printf("--------------------------------------------\n");
+
+
+        printf("Executable       : %s\n",
+               installation_name(backend->installation));
+
+
+        printf("Path             : %s\n",
+               backend->executable[0]
+                   ? backend->executable
+                   : "Not available");
+
+
+        printf("Version          : %s\n",
+               backend->version[0]
+                   ? backend->version
+                   : "Unknown");
+
+
+        printf("Service          : %s\n",
+               service_name(backend->service));
+
+
+        printf("Ruleset          : %s\n",
+               ruleset_name(backend->ruleset));
+
+
+        printf("Enforcement      : %s\n",
+               enforcement_name(backend->enforcement));
+
+
+        printf("Discovery        : %s\n",
+               discovery_result_name(backend->discovery_result));
+    }
 }
 
 
@@ -287,6 +453,8 @@ void dunn_display_snapshot(
     display_banner();
 
     display_system(snapshot);
+
+    display_backends(snapshot);
 
     display_firewall(snapshot);
 
