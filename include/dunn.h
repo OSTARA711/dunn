@@ -14,12 +14,13 @@
 
 #define DUNN_MAX_RULES 128
 #define DUNN_MAX_PORTS 128
+#define DUNN_MAX_BACKENDS 4
 
 
 /*
  * Discovery results
  *
- * These values describe the outcome of an inspection operation.
+ * Each inspection operation has an independent result.
  * A discovery failure must not automatically terminate DUNN.
  */
 
@@ -37,6 +38,11 @@ typedef enum
 
 /*
  * Firewall backends
+ *
+ * DUNN_BACKEND_NONE is an aggregate result:
+ * no supported backend was detected.
+ *
+ * It is not an individual backend to inspect.
  */
 
 typedef enum
@@ -45,13 +51,78 @@ typedef enum
     DUNN_BACKEND_NONE,
     DUNN_BACKEND_UFW,
     DUNN_BACKEND_NFTABLES,
-    DUNN_BACKEND_FIREWALLD
+    DUNN_BACKEND_FIREWALLD,
+    DUNN_BACKEND_IPTABLES
 
 } DunnFirewallBackend;
 
 
 /*
+ * Backend installation state
+ */
+
+typedef enum
+{
+    DUNN_INSTALLATION_UNKNOWN = 0,
+    DUNN_INSTALLATION_NOT_INSTALLED,
+    DUNN_INSTALLATION_INSTALLED
+
+} DunnInstallationState;
+
+
+/*
+ * Backend service state
+ *
+ * Some backends do not use a dedicated service.
+ */
+
+typedef enum
+{
+    DUNN_SERVICE_UNKNOWN = 0,
+    DUNN_SERVICE_NOT_APPLICABLE,
+    DUNN_SERVICE_INACTIVE,
+    DUNN_SERVICE_ACTIVE
+
+} DunnServiceState;
+
+
+/*
+ * Firewall ruleset state
+ */
+
+typedef enum
+{
+    DUNN_RULESET_UNKNOWN = 0,
+    DUNN_RULESET_NOT_APPLICABLE,
+    DUNN_RULESET_EMPTY,
+    DUNN_RULESET_PRESENT
+
+} DunnRulesetState;
+
+
+/*
+ * Firewall enforcement state
+ *
+ * Enforcement must not be inferred merely from:
+ * - package installation;
+ * - service activity;
+ * - executable availability;
+ * - the existence of a ruleset.
+ */
+
+typedef enum
+{
+    DUNN_ENFORCEMENT_UNKNOWN = 0,
+    DUNN_ENFORCEMENT_NOT_ESTABLISHED,
+    DUNN_ENFORCEMENT_ESTABLISHED
+
+} DunnEnforcementState;
+
+
+/*
  * Firewall operational state
+ *
+ * Retained for the existing global firewall status.
  */
 
 typedef enum
@@ -80,7 +151,36 @@ typedef struct
 
 
 /*
+ * Individual firewall backend information
+ *
+ * Each supported backend is inspected independently.
+ *
+ * The executable and version fields are informational.
+ * Their presence does not establish firewall enforcement.
+ */
+
+typedef struct
+{
+    DunnFirewallBackend backend;
+
+    DunnInstallationState installation;
+    DunnServiceState service;
+    DunnRulesetState ruleset;
+    DunnEnforcementState enforcement;
+
+    char executable[128];
+    char version[64];
+
+    DunnDiscoveryResult discovery_result;
+
+} DunnFirewallBackendInfo;
+
+
+/*
  * Firewall global state
+ *
+ * Retained for compatibility with the existing UFW
+ * status collector and display implementation.
  */
 
 typedef struct
@@ -89,8 +189,8 @@ typedef struct
     DunnFirewallState state;
 
     /*
-     * Retained temporarily for compatibility with display.c.
-     * Will be removed when display.c migrates to state.
+     * Temporary compatibility field.
+     * To be removed when all collectors use state.
      */
 
     int active;
@@ -152,6 +252,20 @@ typedef struct
 
     DunnFirewallStatus status;
 
+    /*
+     * Independent backend discovery.
+     *
+     * The entries describe detected backends.
+     * Multiple entries may be present simultaneously.
+     */
+
+    DunnFirewallBackendInfo backends[DUNN_MAX_BACKENDS];
+    size_t backend_count;
+
+    DunnFirewallBackend aggregate_backend;
+
+    DunnDiscoveryResult backend_result;
+
     DunnFirewallRule rules[DUNN_MAX_RULES];
     size_t rule_count;
 
@@ -160,8 +274,6 @@ typedef struct
 
     /*
      * Individual discovery outcomes.
-     *
-     * Each operation can succeed or fail independently.
      */
 
     DunnDiscoveryResult system_result;
@@ -178,6 +290,19 @@ typedef struct
 
 DunnDiscoveryResult dunn_rekon_system(
         DunnSystemInfo *system);
+
+
+/*
+ * Firewall backend reconnaissance
+ *
+ * Inspects supported backends independently.
+ * Must remain read-only.
+ */
+
+DunnDiscoveryResult dunn_rekon_firewall_backends(
+        DunnFirewallBackendInfo *backends,
+        size_t max_backends,
+        size_t *count);
 
 
 /*
