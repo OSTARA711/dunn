@@ -15,10 +15,15 @@
 
 
 /*
- * Copy a value from os-release.
+ * Copy and decode a value from os-release.
  *
- * Handles quoted and unquoted values without executing
- * or interpreting the file as a shell script.
+ * The file is read as data, never executed as a shell script.
+ *
+ * Supports:
+ * - Unquoted values.
+ * - Single-quoted values.
+ * - Double-quoted values.
+ * - Escaped characters in double-quoted values.
  */
 
 static void copy_os_value(
@@ -28,6 +33,13 @@ static void copy_os_value(
 {
     size_t length = 0;
     char quote = '\0';
+
+
+    if (!destination || destination_size == 0 || !value)
+        return;
+
+
+    destination[0] = '\0';
 
 
     while (isspace((unsigned char)*value))
@@ -48,15 +60,26 @@ static void copy_os_value(
             if (*value == quote)
                 break;
 
+
             if (quote == '"' && *value == '\\' && value[1])
             {
-                value++;
+                char escaped = value[1];
+
+                if (escaped == '\\' ||
+                    escaped == '"' ||
+                    escaped == '$' ||
+                    escaped == '`')
+                {
+                    destination[length++] = escaped;
+                    value += 2;
+                    continue;
+                }
             }
         }
         else
         {
-            if (*value == '#' ||
-                isspace((unsigned char)*value))
+            if (isspace((unsigned char)*value) ||
+                *value == '#')
             {
                 break;
             }
@@ -71,82 +94,195 @@ static void copy_os_value(
 }
 
 
+/*
+ * Read one os-release file.
+ *
+ * Returns:
+ *   1  Information was found.
+ *   0  No recognised information was found.
+ *  -1  File could not be opened or read.
+ */
+
+static int read_os_release_file(
+        const char *path,
+        char *pretty_name,
+        size_t pretty_name_size,
+        char *name,
+        size_t name_size,
+        char *version,
+        size_t version_size)
+{
+    FILE *fp;
+
+    char line[512];
+    char *separator;
+
+    int found = 0;
+
+
+    fp = fopen(path, "r");
+
+    if (!fp)
+        return -1;
+
+
+    while (fgets(line, sizeof(line), fp))
+    {
+        /*
+         * Ignore comments and empty lines.
+         */
+
+        if (line[0] == '#' || line[0] == '\n')
+            continue;
+
+
+        separator = strchr(line, '=');
+
+        if (!separator)
+            continue;
+
+
+        *separator = '\0';
+
+        const char *value = separator + 1;
+
+
+        if (strcmp(line, "PRETTY_NAME") == 0)
+        {
+            copy_os_value(
+                    pretty_name,
+                    pretty_name_size,
+                    value);
+
+            found = pretty_name[0] != '\0' || found;
+        }
+
+
+        else if (strcmp(line, "NAME") == 0)
+        {
+            copy_os_value(
+                    name,
+                    name_size,
+                    value);
+
+            found = name[0] != '\0' || found;
+        }
+
+
+        else if (strcmp(line, "VERSION_ID") == 0)
+        {
+            copy_os_value(
+                    version,
+                    version_size,
+                    value);
+
+            found = version[0] != '\0' || found;
+        }
+    }
+
+
+    int read_error = ferror(fp);
+
+    fclose(fp);
+
+
+    if (read_error)
+        return -1;
+
+
+    return found;
+}
+
 
 /*
  * Read operating system information.
  *
  * /etc/os-release is preferred.
  * /usr/lib/os-release is used as a fallback.
+ *
+ * PRETTY_NAME is preferred for the displayed OS name.
  */
 
 static int read_os_release(DunnSystemInfo *system)
 {
-    FILE *fp;
+    char pretty_name[128] = "";
+    char name[128] = "";
+    char version[64] = "";
 
-    char line[512];
-
-    int found_name = 0;
-    int found_version = 0;
-
-
-    fp = fopen("/etc/os-release", "r");
-
-    if (!fp)
-        fp = fopen("/usr/lib/os-release", "r");
-
-    if (!fp)
-        return 0;
+    int result;
 
 
-    while (fgets(line, sizeof(line), fp))
+    result = read_os_release_file(
+            "/etc/os-release",
+            pretty_name,
+            sizeof(pretty_name),
+            name,
+            sizeof(name),
+            version,
+            sizeof(version));
+
+
+    if (result < 0)
     {
-        if (strncmp(line, "NAME=", 5) == 0)
-        {
-            copy_os_value(
-                    system->os_name,
-                    sizeof(system->os_name),
-                    line + 5);
-
-            found_name = system->os_name[0] != '\0';
-        }
-
-
-        else if (strncmp(line, "VERSION_ID=", 11) == 0)
-        {
-            copy_os_value(
-                    system->os_version,
-                    sizeof(system->os_version),
-                    line + 11);
-
-            found_version = system->os_version[0] != '\0';
-        }
-
-
-        else if (strncmp(line, "PRETTY_NAME=", 12) == 0 &&
-                 !found_name)
-        {
-            copy_os_value(
-                    system->os_name,
-                    sizeof(system->os_name),
-                    line + 12);
-
-            found_name = system->os_name[0] != '\0';
-        }
+        result = read_os_release_file(
+                "/usr/lib/os-release",
+                pretty_name,
+                sizeof(pretty_name),
+                name,
+                sizeof(name),
+                version,
+                sizeof(version));
     }
 
 
-    fclose(fp);
+    if (result <= 0)
+        return result;
 
-    return found_name || found_version;
+
+    /*
+     * Prefer the complete distribution name.
+     * Fall back to NAME if PRETTY_NAME is unavailable.
+     */
+
+    if (pretty_name[0] != '\0')
+    {
+        snprintf(
+                system->os_name,
+                sizeof(system->os_name),
+                "%s",
+                pretty_name);
+    }
+    else
+    {
+        snprintf(
+                system->os_name,
+                sizeof(system->os_name),
+                "%s",
+                name);
+    }
+
+
+    snprintf(
+            system->os_version,
+            sizeof(system->os_version),
+            "%s",
+            version);
+
+
+    return 1;
 }
-
 
 
 /*
  * System reconnaissance.
  *
  * Collects distribution and kernel information.
- * Does not require elevated privileges.
+ *
+ * Does not:
+ * - Require root privileges.
+ * - Execute external commands.
+ * - Install or modify software.
+ * - Change system configuration.
  */
 
 DunnDiscoveryResult dunn_rekon_system(
@@ -154,7 +290,7 @@ DunnDiscoveryResult dunn_rekon_system(
 {
     struct utsname information;
 
-    int os_found;
+    int os_result;
 
 
     if (!system)
@@ -168,7 +304,7 @@ DunnDiscoveryResult dunn_rekon_system(
      * Operating system information.
      */
 
-    os_found = read_os_release(system);
+    os_result = read_os_release(system);
 
 
     /*
@@ -176,38 +312,42 @@ DunnDiscoveryResult dunn_rekon_system(
      */
 
     if (uname(&information) != 0)
-        {
-       	return DUNN_DISCOVERY_FAILED;
-       	}
+    	{
+        return DUNN_DISCOVERY_FAILED;
+	}
+
+    snprintf(
+            system->kernel_name,
+            sizeof(system->kernel_name),
+            "%.*s",
+            (int)sizeof(system->kernel_name) - 1,
+            information.sysname);
 
 
-        snprintf(system->kernel_name,
-             sizeof(system->kernel_name),
-             "%.*s",
-             (int)sizeof(system->kernel_name) - 1,
-             information.sysname);
+    snprintf(
+            system->kernel_release,
+            sizeof(system->kernel_release),
+            "%.*s",
+            (int)sizeof(system->kernel_release) - 1,
+            information.release);
 
 
-        snprintf(system->kernel_release,
-             sizeof(system->kernel_release),
-             "%.*s",
-             (int)sizeof(system->kernel_release) - 1,
-             information.release);
-
-
-        snprintf(system->architecture,
-             sizeof(system->architecture),
-             "%.*s",
-             (int)sizeof(system->architecture) - 1,
-             information.machine);
+    snprintf(
+            system->architecture,
+            sizeof(system->architecture),
+            "%.*s",
+            (int)sizeof(system->architecture) - 1,
+            information.machine);
 
 
     /*
-     * A missing os-release file does not prevent
-     * successful kernel reconnaissance.
+     * Kernel reconnaissance succeeded.
+     *
+     * Missing or incomplete distribution information
+     * produces a partial result, not a total failure.
      */
 
-    if (!os_found ||
+    if (os_result != 1 ||
         system->os_name[0] == '\0' ||
         system->os_version[0] == '\0')
     {
