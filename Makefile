@@ -10,6 +10,7 @@ TARGET = dunn
 
 SRC = \
 	src/main.c \
+	src/rekon.c \
 	src/ufw.c \
 	src/display.c
 

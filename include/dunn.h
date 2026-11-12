@@ -173,6 +173,14 @@ typedef struct
 
 
 /*
+ * System reconnaissance
+ */
+
+DunnDiscoveryResult dunn_rekon_system(
+        DunnSystemInfo *system);
+
+
+/*
  * Existing UFW-specific collectors
  *
  * Retained during the transition to backend-independent
